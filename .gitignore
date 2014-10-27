@@ -1,0 +1,4 @@
+# ignore generated jpg files,
+*.jpg
+
+
