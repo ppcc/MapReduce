@@ -1,18 +1,16 @@
 package millionsongs;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
+import org.apache.hadoop.conf.Configuration;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 
 /**
  * Generate k frequent itemsets from k-itemset candidates' files.
  * Created by cpp on 12/01/14.
  */
 public class CandidatesGenerator {
+
+    FileReadWriteUtil utils = new FileReadWriteUtil();
 
     /**
      * Check if first[0..-2] are equals to second[0...-2]
@@ -38,8 +36,8 @@ public class CandidatesGenerator {
      * @return Candidates_2
      * @throws IOException
      */
-    public List<List<Integer>> generateCandidates2(String folderName) throws IOException {
-        List<Integer> oneFreqItems = loadOneFreqItems(folderName);
+    public List<List<Integer>> generateCandidates2(String folderName,Configuration conf) throws Exception {
+        List<Integer> oneFreqItems = loadOneFreqItems(folderName,conf);
         List<List<Integer>> candidates = generateCandidates2(oneFreqItems);
 
         return candidates;
@@ -71,8 +69,8 @@ public class CandidatesGenerator {
      * @return
      * @throws IOException
      */
-    public List<List<Integer>> generateCandidates(String folderName) throws IOException {
-        List<List<Integer>> freqItemsets = loadFreqItems(folderName);
+    public List<List<Integer>> generateCandidates(String folderName, Configuration conf) throws Exception {
+        List<List<Integer>> freqItemsets = loadFreqItems(folderName,conf);
 
         //self join
         List<List<Integer>> candidates = generateCandidates(freqItemsets);
@@ -170,48 +168,34 @@ public class CandidatesGenerator {
      * @return
      * @throws IOException
      */
-    private List<List<Integer>> loadFreqItems(String folderName) throws IOException {
+    private List<List<Integer>> loadFreqItems(String folderName,Configuration conf) throws Exception {
         List<List<Integer>> freqItems = new ArrayList<List<Integer>>();
-        File folder = new File(folderName);
-        File[] files = folder.listFiles();
-        for (File file : files) {
-            if (file.getName().startsWith("."))
-                continue;
-            BufferedReader reader = new BufferedReader(new FileReader(file));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                List<Integer> candidate = new ArrayList<Integer>();
-                String[] items = line.split("\t");
-                for (String item : items) {
-                    candidate.add(Integer.parseInt(item));
-                }
-                freqItems.add(candidate);
+        List<String> contents = utils.read(folderName, conf);
+        String[] items;
+        for(String line : contents){
+            List<Integer> candidate = new ArrayList<Integer>();
+            items = line.split("\t");
+            for (String item : items) {
+                candidate.add(Integer.parseInt(item));
             }
-            reader.close();
+            freqItems.add(candidate);
         }
         return freqItems;
     }
 
     /**
      * Load 1-frequent itemsets from folder
-     * @param folderName
-     * @return
+     * @param folder
+     * @return conf
      * @throws IOException
      */
-    private List<Integer> loadOneFreqItems(String folderName) throws IOException {
+    private List<Integer> loadOneFreqItems(String folder, Configuration conf) throws Exception {
         List<Integer> oneFreqItems = new ArrayList<Integer>();
-        File folder = new File(folderName);
-        File[] files = folder.listFiles();
-        for (File file : files) {
-            if (file.getName().startsWith("."))
-                continue;
-            BufferedReader reader = new BufferedReader(new FileReader(file));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                oneFreqItems.add(Integer.parseInt(line));
-            }
-            reader.close();
+        List<String> contents = utils.read(folder, conf);
+        for (String line : contents) {
+            oneFreqItems.add(Integer.parseInt(line));
         }
+        Collections.sort(oneFreqItems);
         return oneFreqItems;
     }
 }
