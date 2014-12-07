@@ -18,7 +18,10 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Generate k frequent itemsets from k-itemset candidates files.
@@ -26,6 +29,13 @@ import java.util.*;
  */
 public class KFreqItemsetTask {
 
+	/**
+	 * This mapper will read one transaction per map call. It implementes in-mapper combine to improve performance.
+	 * It will first load k candidates into memory when setup. Then it uses a hashmap for tracks the counts of candidates.
+	 * At last, emits (candidates, count) when cleanup.
+	 * @author peilicao
+	 *
+	 */
     public static class MyMapper extends Mapper<Object, Text, Text, IntWritable> {
 
         private Text itemset;
@@ -33,213 +43,239 @@ public class KFreqItemsetTask {
         private List<List<Integer>> kItemCandidates;
         private List<String> candidateStrings;
         private int count = 0;
-        private Map<String,Integer> counter;
+        private Map<String, Integer> counter;
 
         private int k;
 
-        protected void setup(Context context) throws IOException{
+        protected void setup(Context context) throws IOException {
             itemset = new Text();
             times = new IntWritable();
-        	kItemCandidates = loadKItemCandidates(context);
+            kItemCandidates = loadKItemCandidates(context);
             prepareCandidates();
             k = Integer.parseInt(context.getConfiguration().get("K"));
             counter = new HashMap<String, Integer>();
         }
 
-        private void prepareCandidates(){
-        	candidateStrings = new ArrayList<String>();
-        	StringBuilder builder = new StringBuilder();
-        	String s;
-        	for(List<Integer> candidate:kItemCandidates){
-        		builder.setLength(0);
-        		for(int id:candidate){
-        			s = String.valueOf(id);
-        			builder.append(String.format("%0"+(7-s.length()+"d%s"),0, s));
-        			builder.append("\t");
-        		}
-        		builder.setLength(builder.length()-1);
-        		candidateStrings.add(builder.toString());
-        	}
+        /**
+         * Generate string format of candidates
+         */
+        private void prepareCandidates() {
+            candidateStrings = new ArrayList<String>();
+            StringBuilder builder = new StringBuilder();
+            String s;
+            for (List<Integer> candidate : kItemCandidates) {
+                builder.setLength(0);
+                for (int id : candidate) {
+                    s = String.valueOf(id);
+                    builder.append(String.format("%0" + (7 - s.length() + "d%s"), 0, s));
+                    builder.append("\t");
+                }
+                builder.setLength(builder.length() - 1);
+                candidateStrings.add(builder.toString());
+            }
         }
 
-        private boolean doesContains(List<Integer> bigList, List<Integer> smallList){
-        	if(smallList.size() > bigList.size())
-        		return false;
+        /**
+         * Return true if smallList is a sublist of bigList.Both lists are in ascending order.
+         * @param bigList
+         * @param smallList
+         * @return
+         */
+        private boolean doesContains(List<Integer> bigList, List<Integer> smallList) {
+            if (smallList.size() > bigList.size())
+                return false;
 
-        	int bIdx;
-        	int sIdx = 0;
-        	int bigLength = bigList.size();
-        	int smallLength = smallList.size();
+            int bIdx;
+            int sIdx = 0;
+            int bigLength = bigList.size();
+            int smallLength = smallList.size();
 
-        	//Preprocess
-        	int startIndex = bigList.indexOf(smallList.get(0));
+            int startIndex = bigList.indexOf(smallList.get(0));
+            if (startIndex == -1 || (bigLength - startIndex) < smallLength)
+                return false;
 
-        	if(startIndex == -1 || (bigLength - startIndex) < smallLength)
-        		return false;
+            bIdx = startIndex;
 
-        	bIdx = startIndex;
-
-        	while(bIdx != -1 && bIdx < bigLength && sIdx < smallLength){
-        		if(bigList.get(bIdx).equals(smallList.get(sIdx))){
-        			sIdx ++;
-					bIdx ++;
-        			if(sIdx == smallLength)
-        				return true;
-        		}else if(bigList.get(bIdx) > smallList.get(sIdx)){
-        			return false;
-        		}else{
-        			bIdx ++;
-        		}
-        	}
-        	return false;
+            while (bIdx != -1 && bIdx < bigLength && sIdx < smallLength) {
+                if (bigList.get(bIdx).equals(smallList.get(sIdx))) {
+                    sIdx++;
+                    bIdx++;
+                    if (sIdx == smallLength)
+                        return true;
+                } else if (bigList.get(bIdx) > smallList.get(sIdx)) {
+                    return false;
+                } else {
+                    bIdx++;
+                }
+            }
+            return false;
         }
 
-        public void map(Object key, Text value, Context context){
-			count++;
-			if(count % 1000 == 0)
-				System.out.println("Transaction:" + count + " time:"+new Date());
-        	// Store items into List<Integer>
+        public void map(Object key, Text value, Context context) {
+            count++;
+//			if(count % 1000 == 0)
+//				System.out.println("Transaction:" + count + " time:"+new Date());
+            // Store items into List<Integer>
             String[] items = value.toString().split("\t");
-            if(items.length < k)
-            	return;
+            if (items.length < k)
+                return;
             List<Integer> transactions = new ArrayList<Integer>();
             boolean first = true;
-            for(String item : items){
-            	if(first){
-            		first = false;
-            		continue;
-            	}
-            	transactions.add(Integer.parseInt(item));
+            for (String item : items) {
+                if (first) {
+                    first = false;
+                    continue;
+                }
+                transactions.add(Integer.parseInt(item));
             }
             int size = transactions.size();
-            //Go through all candidates, if transaction contains candidate, emit candidate
+            /*
+             * Go through all candidates, 
+             * if transaction contains candidate, emit candidate
+             */
             List<Integer> candidate;
             int count;
             String str;
-            for(int i=0;i<kItemCandidates.size();i++){
-            	candidate = kItemCandidates.get(i);
-            	if(candidate.get(0) > transactions.get(size-1))
-            		break;
+            for (int i = 0; i < kItemCandidates.size(); i++) {
+                candidate = kItemCandidates.get(i);
+                if (candidate.get(0) > transactions.get(size - 1))
+                    break;
+                if (doesContains(transactions, candidate)) {
+                    str = candidateStrings.get(i);
+                    if (counter.containsKey(str)) {
+                        count = counter.get(str) + 1;
+                    } else {
+                        count = 1;
+                    }
+                    counter.put(str, count);
+                }
+            }
+        }
 
-            	if(doesContains(transactions,candidate)){
-            		str = candidateStrings.get(i);
-            		if(counter.containsKey(str)){
-            			count = counter.get(str)+1;
-            		}else{
-            			count = 1;
-            		}
-            		counter.put(str, count);
+        protected void cleanup(Context context) throws IOException, InterruptedException {
+            for (Map.Entry<String, Integer> entry : counter.entrySet()) {
+                itemset.set(entry.getKey());
+                times.set(entry.getValue());
+                context.write(itemset, times);
+            }
+            candidateStrings.clear();
+            counter.clear();
+            kItemCandidates.clear();
+        }
 
-            	}
+        /**
+         * Load k frequent candidates from DistributedCache.
+         * This function will run at each time a mapper setup.
+         * @param context - mapper context
+         * @return a list of candidates
+         * @throws IOException
+         */
+        private List<List<Integer>> loadKItemCandidates(Context context) throws IOException {
+            List<List<Integer>> kItemCandidates = new ArrayList<List<Integer>>();
+
+            Path[] uris = DistributedCache.getLocalCacheFiles(context.getConfiguration());
+            File folder = new File(uris[0].toString());
+            File[] files = folder.listFiles();
+            for (File file : files) {
+                if (file.getName().startsWith("."))
+                    continue;
+                BufferedReader reader = new BufferedReader(new FileReader(file));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    List<Integer> candidate = new ArrayList<Integer>();
+                    String[] items = line.split("\t");
+                    for (String item : items) {
+                        candidate.add(Integer.parseInt(item));
+                    }
+                    kItemCandidates.add(candidate);
+                }
+                reader.close();
             }
 
-
+            return kItemCandidates;
         }
-
-        protected void cleanup(Context context) throws IOException, InterruptedException{
-        	for(Map.Entry<String, Integer> entry:counter.entrySet()){
-        		itemset.set(entry.getKey());
-        		times.set(entry.getValue());
-        		context.write(itemset, times);
-
-        	}
-
-        	candidateStrings.clear();
-        	counter.clear();
-        	kItemCandidates.clear();
-        }
-
-        private List<List<Integer>> loadKItemCandidates(Context context) throws IOException{
-    		List<List<Integer>> kItemCandidates = new ArrayList<List<Integer>>();
-
-    		Path[] uris = DistributedCache.getLocalCacheFiles(context.getConfiguration());
-    		File folder = new File(uris[0].toString());
-    		File[] files = folder.listFiles();
-    		for(File file : files){
-    			if(file.getName().startsWith("."))
-    				continue;
-    			BufferedReader reader = new BufferedReader(new FileReader(file));
-        		String line;
-        		while((line = reader.readLine()) != null){
-        			List<Integer> candidate = new ArrayList<Integer>();
-        			String[] items = line.split("\t");
-        			for(String item: items){
-        				candidate.add(Integer.parseInt(item));
-        			}
-        			kItemCandidates.add(candidate);
-        		}
-        		reader.close();
-    		}
-
-    		return kItemCandidates;
-    	}
     }
 
-	public static class MyPartitioner extends Partitioner<Text, IntWritable>{
-
-		@Override
-		public int getPartition(Text text, IntWritable intWritable, int numOfPartitions) {
-			int id = Integer.parseInt(text.toString().substring(0,7));
-			int maxId = 384545;
-			int interval = (int)Math.ceil(1.0*maxId/numOfPartitions);
-
-			int part = id/interval;
-			if(part == numOfPartitions)
-				return numOfPartitions-1;
-			else
-				return part%numOfPartitions;
-		}
-	}
-
-    public static class MyReducer extends Reducer<Text,IntWritable,Text,NullWritable> {
+    /**
+     * Sum up the counts of each candiate, emit candidate whose count is not less than minimum support
+     * @author peilicao
+     *
+     */
+    public static class MyReducer extends Reducer<Text, IntWritable, Text, NullWritable> {
         private IntWritable output;
         private int minSupport;
 
-        protected void setup(Context context) throws IOException{
+        protected void setup(Context context) throws IOException {
             output = new IntWritable();
             minSupport = Integer.parseInt(context.getConfiguration().get("minSupport"));
         }
 
         @Override
         public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-        	int count = 0;
-        	for(IntWritable value:values){
-        		count += value.get();
-        	}
-        	if(count >= minSupport){
-        		output.set(count);
-            	context.write(key, NullWritable.get());
-            	context.getCounter("Reduce", "Output").increment(1);
-        	}
+            int count = 0;
+            for (IntWritable value : values) {
+                count += value.get();
+            }
+            if (count >= minSupport) {
+                output.set(count);
+                context.write(key, NullWritable.get());
+                context.getCounter("Reduce", "Output").increment(1);
+            }
         }
     }
 
-    public static class MyCombiner extends Reducer<Text,IntWritable,Text,IntWritable> {
-        private IntWritable output;
+    /**
+     * Partition records by using bins.
+     * Records with lower first songid will go to lower id reducer. 
+     * So that the order between each files is kept.
+     * 
+     * @author peilicao
+     *
+     */
+    public static class MyPartitioner extends Partitioner<Text, IntWritable> {
 
-        protected void setup(Context context) throws IOException{
+        @Override
+        public int getPartition(Text text, IntWritable intWritable, int numOfPartitions) {
+            int id = Integer.parseInt(text.toString().substring(0, 7));
+            int maxId = 384545;
+            int interval = (int) Math.ceil(1.0 * maxId / numOfPartitions);
+
+            int part = id / interval;
+            if (part == numOfPartitions)
+                return numOfPartitions - 1;
+            else
+                return part % numOfPartitions;
+        }
+    }
+
+    public static class MyCombiner extends Reducer<Text, IntWritable, Text, IntWritable> {
+        private IntWritable output;
+        private int minSupport;
+
+        protected void setup(Context context) throws IOException {
             output = new IntWritable();
+            minSupport = Integer.parseInt(context.getConfiguration().get("minSupport"));
         }
 
         @Override
         public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-        	int count = 0;
-        	for(IntWritable value:values){
-        		count += value.get();
-        	}
-        	output.set(count);
-           	context.write(key, output);
+            int count = 0;
+            for (IntWritable value : values) {
+                count += value.get();
+            }
+            output.set(count);
+            context.write(key, output);
         }
     }
 
-    public static long run(Configuration conf, int k, String transactionsLoc, String location, String minSupport) throws ClassNotFoundException, IOException, InterruptedException, URISyntaxException{
-    	String datapath = location + "Candidates" +k;
-    	String out = location +"FreqItems"+k;
-    	String[] args = {transactionsLoc,out};
-    	return run(conf, args,datapath,minSupport);
+    public static long run(Configuration conf, int k, String transactionsLoc, String location, String minSupport) throws ClassNotFoundException, IOException, InterruptedException, URISyntaxException {
+        String datapath = location + "Candidates" + k;
+        String out = location + "FreqItems" + k;
+        String[] args = {transactionsLoc, out};
+        return run(conf, args, datapath, minSupport);
     }
 
-    public static long run(Configuration conf,String[] args, String datapath, String minSupport) throws IOException, ClassNotFoundException, InterruptedException, URISyntaxException {
+    public static long run(Configuration conf, String[] args, String datapath, String minSupport) throws IOException, ClassNotFoundException, InterruptedException, URISyntaxException {
         String[] otherArgs = new GenericOptionsParser(conf, args)
                 .getRemainingArgs();
 
@@ -254,23 +290,28 @@ public class KFreqItemsetTask {
 
         job.setMapperClass(MyMapper.class);
         job.setReducerClass(MyReducer.class);
-		job.setPartitionerClass(MyPartitioner.class);
+//        job.setCombinerClass(MyCombiner.class);
+        job.setPartitionerClass(MyPartitioner.class);
+
+
         job.setMapOutputKeyClass(Text.class);
         job.setMapOutputValueClass(IntWritable.class);
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(NullWritable.class);
 
-        job.setNumReduceTasks(10);
+        job.setNumReduceTasks(5);
 
         FileInputFormat.addInputPath(job, new Path(otherArgs[0]));
         FileOutputFormat.setOutputPath(job, new Path(otherArgs[1]));
+
+//		FileInputFormat.setMaxInputSplitSize(job, 3145728*21/3);
 
         DistributedCache.addCacheFile(new URI(datapath), job.getConfiguration());
 
         boolean code = job.waitForCompletion(true);
 
-        if(!code)
-        	return -1;
+        if (!code)
+            return -1;
 
         long number = job.getCounters().getGroup("Reduce").findCounter("Output").getValue();
         return number;
@@ -279,8 +320,8 @@ public class KFreqItemsetTask {
     public static void main(String[] args) throws IOException, ClassNotFoundException, InterruptedException, URISyntaxException {
         String datapath = "/Users/peilicao/WorkSpace/MillionSong/total2000/Candidates2";
         Configuration conf = new Configuration();
-		conf.set("K","2");
-        long code = run(conf,args,datapath,"20000");
+        conf.set("K", "2");
+        long code = run(conf, args, datapath, "20000");
         System.exit(code == -1 ? 0 : 1);
     }
 }
