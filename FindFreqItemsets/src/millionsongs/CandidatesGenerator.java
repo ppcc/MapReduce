@@ -6,17 +6,22 @@ import java.util.*;
 
 /**
  * Generate k frequent itemsets from k-itemset candidates' files.
- * Created by cpp on 12/01/14.
+ * Created by peilicao on 12/01/14.
  */
 public class CandidatesGenerator {
 
     FileReadWriteUtil utils = new FileReadWriteUtil();
 
     /**
-     * Check if first[0..-2] are equals to second[0...-2]
-     * @param first
-     * @param second
-     * @return
+     * Check if two lists are qualified to be used to generate candidate.<br>
+     * Return return true if first[0..-2] are equals to second[0...-2],
+     * otherwise return false.
+     * <p>
+     * The two list must already be ordered ascending.
+     * 
+     * @param first - a list of <code>songid</code>
+     * @param second - a list of <code>songid</code>
+     * @return 
      */
     public boolean isQualified(List<Integer> first, List<Integer> second) {
         int idx1 = 0;
@@ -31,22 +36,23 @@ public class CandidatesGenerator {
     }
 
     /**
-     * Generate Candidates_2
-     * @param folderName Folder contains one frequent items
-     * @return Candidates_2
+     * Generate Candidates_2 by self join one frequent items. One frequent items are loaded from
+     * folder name provided.
+     * @param folderName - Folder contains one frequent items
+     * @param conf - job configuration for loading files from HDFS
+     * @return List<<>> Candidates_2
      * @throws IOException
      */
     public List<List<Integer>> generateCandidates2(String folderName,Configuration conf) throws Exception {
         List<Integer> oneFreqItems = loadOneFreqItems(folderName,conf);
         List<List<Integer>> candidates = generateCandidates2(oneFreqItems);
-
         return candidates;
     }
 
     /**
-     * Generate Candidates_2 (in order self join)
-     * @param oneFreqItems List of one frequent items
-     * @return
+     * Generate Candidates_2 by self join one frequent items. One frequent items are provided through parameters
+     * @param oneFreqItems - List of one frequent items
+     * @return a list of candidates2
      */
     public List<List<Integer>> generateCandidates2(List<Integer> oneFreqItems) {
 
@@ -64,30 +70,29 @@ public class CandidatesGenerator {
     }
 
     /**
-     * Generate candidates_k
+     * Generate candidates_k by doing (k-1) frequent itemsets self join.<br>
+     * (k-1) frequent itemsets is loaded from file.
      * @param folderName Folder L_(k-1) which contains frequent itemsets with k-1 items
-     * @return
+     * @param conf job configuration for loading files from HDFS
+     * @return a list of candidates_k
      * @throws IOException
      */
     public List<List<Integer>> generateCandidates(String folderName, Configuration conf) throws Exception {
         List<List<Integer>> freqItemsets = loadFreqItems(folderName,conf);
-
-        //self join
         List<List<Integer>> candidates = generateCandidates(freqItemsets);
         return candidates;
     }
 
     /**
-     * Generate candidates_k
+     * Generate candidates_k by doing (k-1) frequent itemsets self join.<br>
+     * (k-1) frequent itemsets is given by parameters.
      * @param freqItemsets List of frequent itemsets with k-1 items
-     * @return
+     * @return a list of candidates_k
      * @throws IOException
      */
     public List<List<Integer>> generateCandidates(List<List<Integer>> freqItemsets) throws IOException {
-        //self join
         List<List<Integer>> candidates = selfJoinFreqItemsets(freqItemsets);
         System.out.format("Candidates original size:%d\n", candidates.size());
-        //prune
         prune(freqItemsets, candidates);
         System.out.format("Candidates after pruned size:%d\n", candidates.size());
         return candidates;
@@ -112,8 +117,7 @@ public class CandidatesGenerator {
     }
 
     /**
-     * Prune candidates
-     * Remove candidate if it contains subset which is not in L_k-1
+     * Prune candidates. Remove the certain candidate if and only if it contains subset which is not in L_k-1
      * @param freqItemsets L_k-1, frequent itemsets with k-1 items
      * @param candidates C_k, frequent itemset candidates with k items
      */
